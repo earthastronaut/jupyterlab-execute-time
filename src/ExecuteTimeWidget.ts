@@ -20,6 +20,7 @@ const ANIMATE_CSS = `executeHighlight ${ANIMATE_TIME_MS}ms`;
 export interface IExecuteTimeSettings {
   enabled: boolean;
   highlight: boolean;
+  positioning: string;
 }
 
 export default class ExecuteTimeWidget extends Widget {
@@ -34,7 +35,7 @@ export default class ExecuteTimeWidget extends Widget {
       },
       (err: Error) => {
         console.error(
-          `Could not load settings, so did not active ${PLUGIN_NAME}: ${err}`
+          `jupyterlab-execute-time: Could not load settings, so did not active ${PLUGIN_NAME}: ${err}`
         );
       }
     );
@@ -55,9 +56,10 @@ export default class ExecuteTimeWidget extends Widget {
       const fn = () => this._cellMetadataChanged(cellModel);
       this._cellSlotMap[cellModel.id] = fn;
       cellModel.metadata.changed.connect(fn);
-      // In case there was already metadata (do not highlight on first load)
-      this._cellMetadataChanged(cellModel, true);
     }
+    // Always re-render cells.
+    // In case there was already metadata: do not highlight on first load.
+    this._cellMetadataChanged(cellModel, true);
   }
 
   _deregisterMetadataChanges(cellModel: ICellModel) {
@@ -106,10 +108,7 @@ export default class ExecuteTimeWidget extends Widget {
    * @private
    */
   _removeExecuteNode(cell: CodeCell) {
-    const editorWidget = cell.inputArea.editorWidget;
-    const executionTimeNode = editorWidget.node.querySelector(
-      `.${EXECUTE_TIME_CLASS}`
-    );
+    const executionTimeNode = cell.node.querySelector(`.${EXECUTE_TIME_CLASS}`);
     if (executionTimeNode) {
       executionTimeNode.remove();
     }
@@ -125,15 +124,41 @@ export default class ExecuteTimeWidget extends Widget {
       'execution'
     ) as JSONObject;
     if (executionMetadata && JSONExt.isObject(executionMetadata)) {
-      const editorWidget = cell.inputArea.editorWidget;
-      let executionTimeNode: HTMLDivElement = editorWidget.node.querySelector(
+      let executionTimeNode: HTMLDivElement = cell.node.querySelector(
         `.${EXECUTE_TIME_CLASS}`
       );
+      const parentNode =
+        this._settings.positioning === 'hover'
+          ? cell.inputArea.node.parentNode
+          : cell.inputArea.editorWidget.node;
+
       if (!executionTimeNode) {
         executionTimeNode = document.createElement('div') as HTMLDivElement;
-        executionTimeNode.className = EXECUTE_TIME_CLASS;
-        editorWidget.node.append(executionTimeNode);
+        parentNode.append(executionTimeNode);
+      } else if (executionTimeNode.parentNode !== parentNode) {
+        executionTimeNode.remove();
+        parentNode.append(executionTimeNode);
       }
+
+      let positioning;
+      switch (this._settings.positioning) {
+        case 'left':
+          positioning = 'left';
+          break;
+        case 'right':
+          positioning = 'right';
+          break;
+        case 'hover':
+          positioning = 'hover';
+          break;
+        default:
+          console.error(
+            `'${positioning}' is not a valid type for the setting 'positioning'`
+          );
+      }
+      const positioningClass = `${EXECUTE_TIME_CLASS}-positioning-${this._settings.positioning}`;
+      executionTimeNode.className = `${EXECUTE_TIME_CLASS} ${positioningClass}`;
+
       // More info about timing: https://jupyter-client.readthedocs.io/en/stable/messaging.html#messages-on-the-shell-router-dealer-channel
       // A cell is queued when the kernel has received the message
       // A cell is running when the kernel has started executing
@@ -182,6 +207,8 @@ export default class ExecuteTimeWidget extends Widget {
   _updateSettings(settings: ISettingRegistry.ISettings) {
     this._settings.enabled = settings.get('enabled').composite as boolean;
     this._settings.highlight = settings.get('highlight').composite as boolean;
+    this._settings.positioning = settings.get('positioning')
+      .composite as string;
 
     const cells = this._panel.context.model.cells;
     if (this._settings.enabled) {
@@ -204,5 +231,9 @@ export default class ExecuteTimeWidget extends Widget {
     ) => void;
   } = {};
   private _panel: NotebookPanel;
-  private _settings: IExecuteTimeSettings = { enabled: false, highlight: true };
+  private _settings: IExecuteTimeSettings = {
+    enabled: false,
+    highlight: true,
+    positioning: 'left'
+  };
 }
